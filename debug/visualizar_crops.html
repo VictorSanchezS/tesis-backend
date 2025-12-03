@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug – Uña seleccionada + XAI</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        h2 { margin-top: 30px; }
+        .grid {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+        }
+        .item {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 10px;
+            width: 320px;
+        }
+        img {
+            width: 280px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            background: #f2f2f2; /* 👉 Fondo gris claro detrás de negro */
+        }
+        textarea {
+            width: 100%;
+            height: 160px;
+        }
+        .small {
+            opacity: 0.7;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Debug – Uña seleccionada + Grad-CAM++</h1>
+
+<p>Pega aquí el JSON completo retornado por <code>/predict-hand</code>:</p>
+
+<textarea id="jsonInput" placeholder="Pega aquí tu JSON..."></textarea>
+<br><br>
+<button onclick="mostrar()">Mostrar imágenes</button>
+
+<hr>
+
+<div id="output"></div>
+
+<script>
+function mostrar() {
+    const text = document.getElementById("jsonInput").value;
+    let data = null;
+
+    try {
+        data = JSON.parse(text);
+    } catch (e) {
+        alert("JSON inválido");
+        return;
+    }
+
+    const out = document.getElementById("output");
+    out.innerHTML = ""; 
+
+    if (!data.selected_nail) {
+        out.innerHTML = "<p>No existe 'selected_nail' en la respuesta.</p>";
+        return;
+    }
+
+    const crop = data.selected_nail.crop_image_base64;
+    const xai = data.selected_nail_xai;
+
+    const prob = data.probability?.toFixed(4) ?? "N/A";
+    const area = data.selected_nail.area ?? "N/A";
+    const sharp = data.selected_nail.sharpness?.toFixed(2) ?? "N/A";
+    const score = data.selected_nail.score?.toFixed(2) ?? "N/A";
+
+    const html = `
+        <div class="grid">
+            <div class="item">
+                <h2>🟩 Uña seleccionada</h2>
+                <img src="data:image/jpeg;base64,${crop}">
+                <p class="small"><b>Probabilidad modelo:</b> ${prob}</p>
+                <p class="small"><b>Área:</b> ${area}</p>
+                <p class="small"><b>Nitidez:</b> ${sharp}</p>
+                <p class="small"><b>Score selección:</b> ${score}</p>
+            </div>
+
+            <div class="item">
+                <h2>🔥 Grad-CAM++</h2>
+                ${xai
+                    ? `<img src="data:image/jpeg;base64,${xai}">`
+                    : "<p>No XAI generado (usa xai=true).</p>"
+                }
+            </div>
+        </div>
+    `;
+
+    out.innerHTML = html;
+}
+</script>
+
+</body>
+</html>

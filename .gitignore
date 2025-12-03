@@ -1,0 +1,26 @@
+# ==== PYTHON ====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# ==== ENV (virtual environments) ====
+venv/
+.env
+
+# ==== LARGE DATA FILES ====
+*.csv
+*.xlsx
+*.xls
+*.json
+*.npy
+*.npz
+
+# ==== SYSTEM FILES ====
+.DS_Store
+Thumbs.db
+
+# ==== IDE ====
+.vscode/
+.idea/
