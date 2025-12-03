@@ -57,9 +57,12 @@ def grad_cam_pp(model: keras.Model, img_array: np.ndarray) -> np.ndarray:
     # Gradientes respecto a la clase positiva (preds[:, 0])
     with tf.GradientTape() as tape:
         conv_out, preds = grad_model(img_tensor, training=False)
-        tape.watch(conv_out)
-        # preds shape (1, 1) o (1,) → tomar la columna 0
-        loss = preds[:, 0]
+
+        # --- Normalización universal ---
+        preds = tf.convert_to_tensor(preds)
+        preds = tf.reshape(preds, (-1,))   # → [prob]
+        loss = preds[0]
+
 
     grads = tape.gradient(loss, conv_out)
     if grads is None:
