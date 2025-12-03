@@ -1,11 +1,11 @@
 fastapi
 uvicorn
-tensorflow-cpu==2.14.0
+tensorflow
 pillow
 numpy
-opencv-python-headless==4.8.0.74
+opencv-python
 python-multipart
 requests
 python-dotenv
-inference-sdk==0.9.13
+inference-sdk
 jinja2
