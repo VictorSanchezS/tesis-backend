@@ -1,24 +1,28 @@
-# Imagen base con TensorFlow ya instalado (CPU only)
+# Imagen base: TensorFlow 2.15 con CPU
 FROM tensorflow/tensorflow:2.15.0
 
-# Evitar que Python bufee stdout/stderr
-ENV PYTHONUNBUFFERED=1
+# Evita que TF use optimizaciones que consumen RAM extra
+ENV TF_ENABLE_ONEDNN_OPTS=0
+ENV TF_NUM_INTRAOP_THREADS=1
+ENV TF_NUM_INTEROP_THREADS=1
 
-# Limitar RAM usada por TensorFlow (menos hilos)
-ENV TF_ENABLE_ONEDNN_OPTS=0 \
-    TF_NUM_INTRAOP_THREADS=1 \
-    TF_NUM_INTEROP_THREADS=1
+# Instalar dependencias necesarias para OpenCV
+RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
 
+# Crear carpeta de trabajo
 WORKDIR /app
 
-# Instalar dependencias de Python
+# Copiar requirements
 COPY requirements.txt .
+
+# Instalar dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el resto del código
 COPY . .
 
-EXPOSE 8000
+# Exponer el puerto que Render necesita
+EXPOSE 10000
 
-# Un solo proceso uvicorn (un solo modelo en RAM)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando para iniciar FastAPI
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10000"]
