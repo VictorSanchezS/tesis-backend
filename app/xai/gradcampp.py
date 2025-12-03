@@ -21,15 +21,19 @@ def get_last_conv_layer(model: keras.Model):
 # ============================================================
 
 def grad_cam_pp(model, img_array):
+
     # ----------------------------------------
-    # Paso 1: Predicción y conversión segura
+    # 1. Predicción robusta
     # ----------------------------------------
     preds = model.predict(img_array)
-    preds = np.array(preds, dtype=np.float32)  # <<< FIX DEL ERROR
+
+    # Convertir predicción → numpy array plano
+    preds = np.array(preds, dtype=np.float32).flatten()
+
     pred_class = preds[0]
 
     # ----------------------------------------
-    # Paso 2: Obtener la última capa conv
+    # 2. Última capa conv
     # ----------------------------------------
     last_conv_layer = get_last_conv_layer(model)
 
@@ -39,39 +43,38 @@ def grad_cam_pp(model, img_array):
     )
 
     # ----------------------------------------
-    # Paso 3: Calcular Gradientes
+    # 3. Gradientes
     # ----------------------------------------
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
-        loss = predictions[:, 0]  # Clase positiva (binaria)
+
+        # Asegurar que predictions sea tensor
+        predictions = tf.convert_to_tensor(predictions)
+
+        loss = predictions[:, 0]   # clase positiva
 
     grads = tape.gradient(loss, conv_outputs)
 
     # ----------------------------------------
-    # Paso 4: Grad-CAM++
+    # 4. Cálculo Grad-CAM++
     # ----------------------------------------
     grads = tf.cast(grads, tf.float32)
     conv_outputs = tf.cast(conv_outputs, tf.float32)
 
-    # 1) Grads positivos
     grad_2 = tf.square(grads)
     grad_3 = grads * grad_2
 
-    # 2) Alpha
     numerator = grad_2
     denominator = 2 * grad_2 + conv_outputs * grad_3
     denominator = tf.where(denominator != 0, denominator, tf.ones_like(denominator))
 
     alpha = numerator / denominator
-
-    # 3) Pesos
     weights = tf.reduce_sum(alpha * tf.nn.relu(grads), axis=(1, 2))
 
-    # 4) Heatmap
+    # CAM
     cam = tf.reduce_sum(weights[..., tf.newaxis, tf.newaxis] * conv_outputs, axis=-1)
     heatmap = tf.nn.relu(cam)
 
-    # Normalizar
     heatmap = heatmap[0].numpy()
     heatmap -= np.min(heatmap)
     heatmap /= np.max(heatmap) + 1e-8
@@ -97,7 +100,7 @@ def superimpose_heatmap(img_uint8: np.ndarray, heatmap: np.ndarray) -> np.ndarra
 
 
 # ============================================================
-# 4. UNA SOLA IMAGEN → BASE64 (por si lo usas algún día)
+# 4. UNA SOLA IMAGEN → BASE64
 # ============================================================
 
 def generate_gradcampp(model: keras.Model, img_tensor: np.ndarray) -> str:
