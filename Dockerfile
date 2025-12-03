@@ -1,10 +1,10 @@
-# Imagen base
+# Imagen base mínima con Python
 FROM python:3.10-slim
 
-# Evitar prompts en la instalación
+# Evitar prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias del sistema + Git + Git LFS
+# Instalar Git + Git LFS + dependencias del sistema
 RUN apt-get update && apt-get install -y \
     git \
     git-lfs \
@@ -16,22 +16,24 @@ RUN apt-get update && apt-get install -y \
     && git lfs install \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear directorio de trabajo
+# Directorio de trabajo
 WORKDIR /app
 
-# Copiar requirements
-COPY requirements.txt .
+# Copiar TODO el proyecto al contenedor
+COPY . .
+
+# ↓↓↓ AQUI VIENE LA PARTE IMPORTANTE ↓↓↓
+# Descargar desde Git LFS los archivos reales del modelo
+RUN git lfs pull
+
+# Mostrar el tamaño REAL del archivo .keras dentro del contenedor
+RUN ls -lh modelo_mobilenetv2_anemia_final_XAI.keras
 
 # Instalar dependencias Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el resto del proyecto
-COPY . .
-
-# Verificar que el archivo LFS se descargó correctamente
-RUN ls -lh modelo_mobilenetv2_anemia_final_XAI.keras || echo "Modelo NO encontrado"
-
 # Exponer el puerto
 EXPOSE 8000
 
+# Comando para correr FastAPI
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
