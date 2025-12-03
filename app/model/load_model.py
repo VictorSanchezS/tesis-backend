@@ -1,6 +1,7 @@
 import os
 import requests
-import tensorflow as tf
+import keras  # 👈 usamos Keras directamente
+
 
 # URL del asset en GitHub Releases (v1.0)
 DEFAULT_MODEL_URL = (
@@ -51,7 +52,8 @@ def load_model():
     download_model_if_needed()
 
     print(f"Cargando modelo desde: {MODEL_PATH} ...")
-    model = tf.keras.models.load_model(MODEL_PATH)
+    # 👇 Usamos Keras (formato .keras moderno)
+    model = keras.models.load_model(MODEL_PATH)
     print("✔ Modelo cargado correctamente.")
 
     return model

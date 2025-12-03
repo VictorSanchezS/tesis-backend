@@ -1,7 +1,8 @@
-FROM python:3.10-slim
+FROM tensorflow/tensorflow:2.15.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Dependencias del sistema para OpenCV, etc.
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -12,10 +13,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Instalar dependencias de Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copiar el código de la app
 COPY . .
 
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render te pasa el puerto en $PORT
+ENV PORT=10000
+EXPOSE 10000
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
