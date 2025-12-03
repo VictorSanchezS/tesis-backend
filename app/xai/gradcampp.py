@@ -4,8 +4,9 @@ from tensorflow import keras
 import cv2
 import base64
 
+
 # ============================================================
-# 1. LOCALIZAR LA ÚLTIMA CAPA CONVOLUCIONAL
+# 1. UBICAR LA ÚLTIMA CAPA CONVOLUCIONAL
 # ============================================================
 
 def get_last_conv_layer(model: keras.Model):
@@ -19,50 +20,63 @@ def get_last_conv_layer(model: keras.Model):
 # 2. GRAD-CAM++
 # ============================================================
 
-def grad_cam_pp(model: keras.Model, img_tensor: np.ndarray) -> np.ndarray:
-    """
-    img_tensor: numpy de shape (1, H, W, 3) normalizado [0,1].
-    Devuelve: heatmap normalizado (H, W) en float32.
-    """
-    img_tensor = tf.convert_to_tensor(img_tensor, dtype=tf.float32)
+def grad_cam_pp(model, img_array):
+    # ----------------------------------------
+    # Paso 1: Predicción y conversión segura
+    # ----------------------------------------
+    preds = model.predict(img_array)
+    preds = np.array(preds, dtype=np.float32)  # <<< FIX DEL ERROR
+    pred_class = preds[0]
 
+    # ----------------------------------------
+    # Paso 2: Obtener la última capa conv
+    # ----------------------------------------
     last_conv_layer = get_last_conv_layer(model)
 
     grad_model = keras.models.Model(
-        inputs=model.inputs,
-        outputs=[last_conv_layer.output, model.output]
+        [model.inputs],
+        [last_conv_layer.output, model.output]
     )
 
+    # ----------------------------------------
+    # Paso 3: Calcular Gradientes
+    # ----------------------------------------
     with tf.GradientTape() as tape:
-        conv_out, preds = grad_model(img_tensor)
-        pred_class = preds[:, 0]
-        loss = pred_class
+        conv_outputs, predictions = grad_model(img_array)
+        loss = predictions[:, 0]  # Clase positiva (binaria)
 
-    grads = tape.gradient(loss, conv_out)
-    if grads is None:
-        h = img_tensor.shape[1]
-        w = img_tensor.shape[2]
-        return np.zeros((h, w), dtype=np.float32)
+    grads = tape.gradient(loss, conv_outputs)
 
-    conv = conv_out[0].numpy()
-    g = grads[0].numpy().astype(np.float32)
+    # ----------------------------------------
+    # Paso 4: Grad-CAM++
+    # ----------------------------------------
+    grads = tf.cast(grads, tf.float32)
+    conv_outputs = tf.cast(conv_outputs, tf.float32)
 
-    g2 = g ** 2
-    g3 = g ** 3
+    # 1) Grads positivos
+    grad_2 = tf.square(grads)
+    grad_3 = grads * grad_2
 
-    denom = 2.0 * g2 + np.sum(g3 * conv, axis=(0, 1), keepdims=True)
-    denom = np.where(denom != 0, denom, 1e-10)
+    # 2) Alpha
+    numerator = grad_2
+    denominator = 2 * grad_2 + conv_outputs * grad_3
+    denominator = tf.where(denominator != 0, denominator, tf.ones_like(denominator))
 
-    alpha = g2 / denom
-    weights = np.sum(alpha * np.maximum(g, 0.0), axis=(0, 1))
+    alpha = numerator / denominator
 
-    heatmap = np.tensordot(conv, weights, axes=([2], [0]))
-    heatmap = np.maximum(heatmap, 0.0)
+    # 3) Pesos
+    weights = tf.reduce_sum(alpha * tf.nn.relu(grads), axis=(1, 2))
 
-    if heatmap.max() > 0:
-        heatmap /= heatmap.max()
+    # 4) Heatmap
+    cam = tf.reduce_sum(weights[..., tf.newaxis, tf.newaxis] * conv_outputs, axis=-1)
+    heatmap = tf.nn.relu(cam)
 
-    return heatmap.astype(np.float32)
+    # Normalizar
+    heatmap = heatmap[0].numpy()
+    heatmap -= np.min(heatmap)
+    heatmap /= np.max(heatmap) + 1e-8
+
+    return heatmap
 
 
 # ============================================================
