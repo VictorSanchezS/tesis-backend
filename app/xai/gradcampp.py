@@ -4,40 +4,39 @@ from tensorflow import keras
 import cv2
 import base64
 
-
 # ============================================================
-# 1. ENCONTRAR LA ÚLTIMA CAPA CONVOLUCIONAL DEL MODELO
+# 1. LOCALIZAR LA ÚLTIMA CAPA CONVOLUCIONAL
 # ============================================================
 
 def get_last_conv_layer(model: keras.Model):
     for layer in reversed(model.layers):
         if isinstance(layer, keras.layers.Conv2D):
             return layer
-    raise ValueError("No se encontró ninguna capa Conv2D en el modelo.")
+    raise ValueError("No se encontró una capa Conv2D en el modelo.")
 
 
 # ============================================================
 # 2. GRAD-CAM++
 # ============================================================
 
-def grad_cam_pp(model: keras.Model, img_tensor: tf.Tensor) -> np.ndarray:
+def grad_cam_pp(model: keras.Model, img_tensor: np.ndarray) -> np.ndarray:
+    """
+    img_tensor: numpy de shape (1, H, W, 3) normalizado [0,1].
+    Devuelve: heatmap normalizado (H, W) en float32.
+    """
     img_tensor = tf.convert_to_tensor(img_tensor, dtype=tf.float32)
 
     last_conv_layer = get_last_conv_layer(model)
 
-    grad_model = keras.Model(
-        inputs=model.input,
-        outputs=[last_conv_layer.output, model.output],
+    grad_model = keras.models.Model(
+        inputs=model.inputs,
+        outputs=[last_conv_layer.output, model.output]
     )
 
     with tf.GradientTape() as tape:
-        conv_out, preds = grad_model(img_tensor, training=False)
-        tape.watch(conv_out)
-
-        # ⚠️ CLAVE: convertir a tensor
-        preds = tf.convert_to_tensor(preds)
-
-        loss = preds[:, 0]  # binario
+        conv_out, preds = grad_model(img_tensor)
+        pred_class = preds[:, 0]
+        loss = pred_class
 
     grads = tape.gradient(loss, conv_out)
     if grads is None:
@@ -46,19 +45,19 @@ def grad_cam_pp(model: keras.Model, img_tensor: tf.Tensor) -> np.ndarray:
         return np.zeros((h, w), dtype=np.float32)
 
     conv = conv_out[0].numpy()
-    g = grads[0].numpy()
+    g = grads[0].numpy().astype(np.float32)
 
     g2 = g ** 2
     g3 = g ** 3
 
-    denom = 2 * g2 + np.sum(g3 * conv, axis=(0, 1), keepdims=True)
+    denom = 2.0 * g2 + np.sum(g3 * conv, axis=(0, 1), keepdims=True)
     denom = np.where(denom != 0, denom, 1e-10)
 
     alpha = g2 / denom
-    weights = np.sum(alpha * np.maximum(g, 0), axis=(0, 1))
+    weights = np.sum(alpha * np.maximum(g, 0.0), axis=(0, 1))
 
     heatmap = np.tensordot(conv, weights, axes=([2], [0]))
-    heatmap = np.maximum(heatmap, 0)
+    heatmap = np.maximum(heatmap, 0.0)
 
     if heatmap.max() > 0:
         heatmap /= heatmap.max()
@@ -84,7 +83,7 @@ def superimpose_heatmap(img_uint8: np.ndarray, heatmap: np.ndarray) -> np.ndarra
 
 
 # ============================================================
-# 4. UNA SOLA IMAGEN → BASE64
+# 4. UNA SOLA IMAGEN → BASE64 (por si lo usas algún día)
 # ============================================================
 
 def generate_gradcampp(model: keras.Model, img_tensor: np.ndarray) -> str:
@@ -99,10 +98,6 @@ def generate_gradcampp(model: keras.Model, img_tensor: np.ndarray) -> str:
     _, buffer = cv2.imencode(".jpg", overlay)
     return base64.b64encode(buffer).decode("utf-8")
 
-
-# ============================================================
-# 5. BATCH (lista de imágenes 224x224x3)
-# ============================================================
 
 def generate_gradcam_pp_for_batch(model, images):
     result = []

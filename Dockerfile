@@ -1,15 +1,13 @@
+# Imagen base con TensorFlow ya instalado (CPU only)
 FROM tensorflow/tensorflow:2.15.0
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Evitar que Python bufee stdout/stderr
+ENV PYTHONUNBUFFERED=1
 
-# Dependencias del sistema para OpenCV, etc.
-RUN apt-get update && apt-get install -y \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
-    && rm -rf /var/lib/apt/lists/*
+# Limitar RAM usada por TensorFlow (menos hilos)
+ENV TF_ENABLE_ONEDNN_OPTS=0 \
+    TF_NUM_INTRAOP_THREADS=1 \
+    TF_NUM_INTEROP_THREADS=1
 
 WORKDIR /app
 
@@ -17,11 +15,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código de la app
+# Copiar el resto del código
 COPY . .
 
-# Render te pasa el puerto en $PORT
-ENV PORT=10000
-EXPOSE 10000
+EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# Un solo proceso uvicorn (un solo modelo en RAM)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

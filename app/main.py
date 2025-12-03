@@ -1,8 +1,6 @@
-import io
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
 import cv2
 import base64
 import os
@@ -26,6 +24,7 @@ from app.xai.gradcampp import grad_cam_pp, superimpose_heatmap
 
 app = FastAPI(title="Detección de Anemia - FastAPI")
 
+# Cargar modelo una sola vez al arrancar el servidor
 model = load_model()
 
 ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY")
@@ -33,11 +32,20 @@ if not ROBOFLOW_API_KEY:
     raise ValueError("Falta la variable de entorno ROBOFLOW_API_KEY")
 
 WORKSPACE = "victor-873iw"
-WORKFLOW_ID = "custom-workflow"
+WORKFLOW_ID = os.getenv("ROBOFLOW_WORKFLOW", "custom-workflow")
 
 rf_client = InferenceHTTPClient(
     api_url="https://serverless.roboflow.com",
     api_key=ROBOFLOW_API_KEY
+)
+
+# CORS (ajusta orígenes si quieres restringir)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # puedes cambiarlo a tu dominio del frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # -------------------------------------------------------
@@ -88,16 +96,23 @@ def crop_polygon_exact(image, points):
     return crop_exact, bbox, crop_mask
 
 
-def compute_sharpness(gray):
-    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+def compute_sharpness(gray: np.ndarray) -> float:
+    """
+    Varianza del Laplaciano, usando float32 para gastar menos memoria.
+    """
+    lap = cv2.Laplacian(gray, cv2.CV_32F)
+    return float(lap.var())
 
 
-def compute_color_score(rgb):
+def compute_color_score(rgb: np.ndarray) -> float:
     R, G, B = np.mean(rgb, axis=(0, 1))
-    score = 0
-    if R > 100: score += 0.4
-    if abs(R - G) < 80: score += 0.3
-    if B > 60: score += 0.3
+    score = 0.0
+    if R > 100:
+        score += 0.4
+    if abs(R - G) < 80:
+        score += 0.3
+    if B > 60:
+        score += 0.3
     return min(score, 1.0)
 
 
@@ -105,7 +120,7 @@ def is_valid_nail(area, ratio, color_score):
     return area >= 400 and (0.3 <= ratio <= 2.8) and color_score >= 0.25
 
 
-def encode_img(img):
+def encode_img(img: np.ndarray) -> str:
     _, buf = cv2.imencode(".jpg", img)
     return base64.b64encode(buf).decode("utf-8")
 
@@ -119,16 +134,23 @@ async def predict_hand(
     file: UploadFile = File(...),
     xai: bool = Query(False)
 ):
+    # Leer bytes de la imagen
     contents = await file.read()
 
-    pil_img = Image.open(io.BytesIO(contents)).convert("RGB")
-    np_img = np.array(pil_img)
-    cv_img = cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
+    # Decodificar directamente con OpenCV (BGR) → menos copias en memoria
+    np_bytes = np.frombuffer(contents, np.uint8)
+    cv_img = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
+    if cv_img is None:
+        return {"error": "No se pudo decodificar la imagen"}
 
-    # Archivo temporal para Roboflow
+    # Archivo temporal para Roboflow (solo se usa la ruta)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(contents)
         tmp_path = tmp.name
+
+    # Ya no necesitamos los bytes en RAM
+    del contents
+    del np_bytes
 
     # Ejecutar workflow
     try:
@@ -147,7 +169,10 @@ async def predict_hand(
     # Extraer detecciones
     detections = []
     if isinstance(result, list):
-        if "predictions" in result[0] and "predictions" in result[0]["predictions"]:
+        if (
+            "predictions" in result[0]
+            and "predictions" in result[0]["predictions"]
+        ):
             detections = result[0]["predictions"]["predictions"]
 
     if not detections:
@@ -162,14 +187,14 @@ async def predict_hand(
 
         h, w = crop.shape[:2]
         area = h * w
-        ratio = h / w
+        ratio = h / w if w > 0 else 0
 
         rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
         sharpness = compute_sharpness(gray)
         color_score = compute_color_score(rgb)
-        sharp_norm = sharpness / (sharpness + 5000)
+        sharp_norm = sharpness / (sharpness + 5000.0)
 
         score = det["confidence"] * 0.5 + sharp_norm * 0.3 + color_score * 0.2
         valid = is_valid_nail(area, ratio, color_score)
@@ -184,8 +209,11 @@ async def predict_hand(
             "color_score": color_score,
             "score": score,
             "prob": det["confidence"],
-            "valid": valid
+            "valid": valid,
         })
+
+    if not candidates:
+        return {"error": "No se pudo usar ninguna detección", "workflow_raw": result}
 
     # Selección final
     valid = [c for c in candidates if c["valid"]]
@@ -198,8 +226,11 @@ async def predict_hand(
     # PREPROCESAMIENTO EXACTO
     processed = preprocess_nail_crop_bgr(crop)
 
+    # Reusar el mismo batch para predicción y XAI
+    batch = np.expand_dims(processed, axis=0)
+
     # PREDICCIÓN
-    pred = float(model.predict(np.expand_dims(processed, axis=0), verbose=0)[0][0])
+    pred = float(model.predict(batch, verbose=0)[0][0])
     predicted_class = int(pred >= 0.5)
 
     # ===============================
@@ -207,19 +238,17 @@ async def predict_hand(
     # ===============================
     xai_img = None
     if xai:
-        # 1. Heatmap
-        heatmap = grad_cam_pp(model, np.expand_dims(processed, axis=0))
+        heatmap = grad_cam_pp(model, batch)
 
-        # 2. Superposición
         overlay = superimpose_heatmap(
             np.uint8(processed * 255),
             heatmap
         )
 
-        # 3. Ajustar máscara al tamaño 224×224
+        # Ajustar máscara al tamaño 224×224
         mask_resized = cv2.resize(mask_crop, (224, 224), interpolation=cv2.INTER_NEAREST)
 
-        # 4. Aplicar máscara → SOLO uña
+        # Aplicar máscara → SOLO uña
         overlay_masked = cv2.bitwise_and(overlay, overlay, mask=mask_resized)
 
         xai_img = encode_img(overlay_masked)
@@ -238,10 +267,10 @@ async def predict_hand(
             "sharpness": best["sharpness"],
             "color_score": best["color_score"],
             "score": best["score"],
-            "crop_image_base64": encode_img(crop)
+            "crop_image_base64": encode_img(crop),
         },
         "selected_nail_xai": xai_img,
-        "workflow_raw": result
+        "workflow_raw": result,  # si quisieras ahorrar más RAM/red, aquí podrías resumirlo
     }
 
 
