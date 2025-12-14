@@ -176,7 +176,7 @@ async def predict_hand(
             detections = result[0]["predictions"]["predictions"]
 
     if not detections:
-        return {"error": "No se detectaron uñas", "workflow_raw": result}
+        return {"error": "No se detectaron uñas"}
 
     # Evaluación de candidatos
     candidates = []
@@ -213,7 +213,7 @@ async def predict_hand(
         })
 
     if not candidates:
-        return {"error": "No se pudo usar ninguna detección", "workflow_raw": result}
+        return {"error": "No se pudo usar ninguna detección"}
 
     # Selección final
     valid = [c for c in candidates if c["valid"]]
@@ -270,7 +270,7 @@ async def predict_hand(
             "crop_image_base64": encode_img(crop),
         },
         "selected_nail_xai": xai_img,
-        "workflow_raw": result,  # si quisieras ahorrar más RAM/red, aquí podrías resumirlo
+        #"workflow_raw": result,  # si quisieras ahorrar más RAM/red, aquí podrías resumirlo
     }
 
 
