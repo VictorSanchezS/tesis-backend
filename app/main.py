@@ -6,6 +6,8 @@ import base64
 import os
 import tempfile
 from dotenv import load_dotenv
+from fastapi import HTTPException
+
 
 # === Cargar variables de entorno ===
 load_dotenv()
@@ -141,7 +143,10 @@ async def predict_hand(
     np_bytes = np.frombuffer(contents, np.uint8)
     cv_img = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
     if cv_img is None:
-        return {"error": "No se pudo decodificar la imagen"}
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo decodificar la imagen"
+        )
 
     # Archivo temporal para Roboflow (solo se usa la ruta)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
@@ -162,7 +167,11 @@ async def predict_hand(
         )
     except Exception as e:
         os.unlink(tmp_path)
-        return {"error": f"Error llamando al Workflow: {e}"}
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error llamando al workflow de segmentación: {str(e)}"
+        )
+
 
     os.unlink(tmp_path)
 
@@ -176,7 +185,11 @@ async def predict_hand(
             detections = result[0]["predictions"]["predictions"]
 
     if not detections:
-        return {"error": "No se detectaron uñas"}
+        raise HTTPException(
+            status_code=422,
+            detail="No se detectaron uñas en la imagen"
+        )
+
 
     # Evaluación de candidatos
     candidates = []
@@ -213,7 +226,11 @@ async def predict_hand(
         })
 
     if not candidates:
-        return {"error": "No se pudo usar ninguna detección"}
+        raise HTTPException(
+            status_code=422,
+            detail="No se encontró una uña válida para el análisis"
+        )
+
 
     # Selección final
     valid = [c for c in candidates if c["valid"]]
