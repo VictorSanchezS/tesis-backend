@@ -1,3 +1,4 @@
+# main.py
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,12 @@ app = FastAPI(title="Detección de Anemia - FastAPI")
 
 # Cargar modelo una sola vez al arrancar el servidor
 model = load_model()
+
+# Warm-up
+_dummy = np.zeros((1, 224, 224, 3), dtype=np.float32)
+model.predict(_dummy, verbose=0)
+print("✔ Warm-up completado.")
+del _dummy
 
 ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY")
 if not ROBOFLOW_API_KEY:
